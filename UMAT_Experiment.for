@@ -1,0 +1,260 @@
+      SUBROUTINE UMAT(STRESS,STATEV,DDSDDE,SSE,SPD,SCD,
+     1 RPL,DDSDDT,DRPLDE,DRPLDT,
+     2 STRAN,DSTRAN,TIME,DTIME,TEMP,DTEMP,PREDEF,DPRED,CMNAME,
+     3 NDI,NSHR,NTENS,NSTATV,PROPS,NPROPS,COORDS,DROT,PNEWDT,
+     4 CELENT,DFGRD0,DFGRD1,NOEL,NPT,LAYER,KSPT,KSTEP,KINC)
+C
+      INCLUDE 'ABA_PARAM.INC'
+C
+      CHARACTER*80 CMNAME
+      DIMENSION STRESS(NTENS),STATEV(NSTATV),
+     1 DDSDDE(NTENS,NTENS),
+     2 DDSDDT(NTENS),DRPLDE(NTENS),
+     3 STRAN(NTENS),DSTRAN(NTENS),TIME(2),PREDEF(1),DPRED(1),
+     4 PROPS(NPROPS),COORDS(3),DROT(3,3),DFGRD0(3,3),DFGRD1(3,3),EEARRAY(6),SSARRAY(6)
+C
+C  EVALUATE NEW STRESS TENSOR
+C
+
+C DEFINING PARAMETERS
+
+C PROPS(1) = INITIAL ALPHA
+C PROPS(2) = YOUNG'S MODULUS
+C PROPS(3) = BRAIDING DENSITY
+C PROPS(5) = PHI
+C PROPS(6) = PARAM_PLAIN
+C PROPS(7) = PARAM_3D
+C
+C
+C
+C STATEV(1) = ALPHA
+C STATEV(2) = E_FIBER
+C STATEV(3) = STRAIN_FIBER
+C
+C INITIALIZING MATERIAL PROPERTY CONSTANTS
+
+      PI = 3.14159265
+
+      E = PROPS(1)
+      PO = PROPS(2)
+      DIAM_HOSE = PROPS(3)
+      DIAM_WIRE = PROPS(4)
+      N_SPINDLE = PROPS(5)
+      N_WIRE_PER_SPINDLE = PROPS(6)
+      N_LAYER = PROPS(7)
+      PARAM_THICKNESS = PROPS(8)
+      
+      DEG_ALPHA = PROPS(9)
+
+C INITIALIZING ANDGLE
+      IF (( KINC .EQ. 1).AND.(KSTEP .EQ. 1)) THEN
+            ALPHA = DEG_ALPHA*PI/180.0
+      ELSE
+            ALPHA = STATEV(1)
+      END IF
+
+      DIAM_HOSE_NECKED = DIAM_HOSE/(1-STRAN(3))
+      THICK_HOSE_NECKED = PARAM_THICKNESS*N_LAYER*DIAM_WIRE*(1+STRAN(1))
+      S_RING = 4*THICK_HOSE_NECKED*(DIAM_HOSE_NECKED - THICK_HOSE_NECKED)
+      S_WIRE = N_SPINDLE*N_WIRE_PER_SPINDLE*DIAM_WIRE**2/COS(ALPHA)
+
+
+C      EPSILON = S_WIRE/S_RING
+      STATEV(2) = EPSILON
+
+      test = 1.2
+
+      IF (N_WIRE_PER_SPINDLE .EQ. 4) THEN
+           test = 0.9
+      ELSE IF (N_WIRE_PER_SPINDLE .EQ. 9) THEN
+           test = 10.0
+      ENDIF
+
+
+      PHI = PI/2-ATAN(PI/(COS(ATAN((test)/N_WIRE_PER_SPINDLE))*N_WIRE_PER_SPINDLE/SIN(2*ALPHA)))
+      PHI = 60.0/180*PI
+
+      COVER_FACTER=1-(1-(N_SPINDLE*N_WIRE_PER_SPINDLE*DIAM_WIRE)/(4*PI*(DIAM_HOSE_NECKED/2)*COS(ALPHA)))**2
+      EPSILON=COVER_FACTER
+
+
+
+C  CCCCCCCCCCCCCCC MATRIX CCCCCCCCCCCCCCCCC
+C  INITIALIZING DEFINING DDSDDE ZERO
+
+      DO K1=1,NTENS
+            DO K2=1,NTENS
+                  DDSDDE(K1,K2)=0.0
+            END DO
+      END DO   
+
+C DEFINING DDSDDE
+      C = COS(ALPHA)
+      S = SIN(ALPHA)
+      P = COS(PHI)
+             
+      EEARRAY(1) = P**2
+      EEARRAY(2) = C**2
+      EEARRAY(3) = S**2
+      EEARRAY(4) = P*C
+      EEARRAY(5) = P*S
+      EEARRAY(6) = C*S
+
+      SSARRAY(1) = P**2
+      SSARRAY(2) = C**2
+      SSARRAY(3) = S**2
+      SSARRAY(4) = P*C
+      SSARRAY(5) = P*(-S)
+      SSARRAY(6) = C*(-S)
+
+c      ZETA_B = (EXP(11.5*(EPSILON-0.5))-1)/150
+c      ZETA_B = 1 - ZETA_A
+
+
+
+      ZETA_A = 0
+      ZETA_P = 1
+      ZETA_S = 0
+      ACC_FACTOR = 1.1
+
+c  Switch ==>> Modified / Simplified 
+      Simplifying_Switch = 'OFF'
+
+      IF (Simplifying_Switch .EQ. 'ON') THEN
+            ZETA_A = 1
+            ACC_FACTOR = 2.3
+            ZETA_P = 0
+            ZETA_S = 0
+      ENDIF
+
+c modification many spindles
+      IF (DIAM_WIRE .EQ. 0.2) THEN       
+            ZETA_A = 0                                        
+            ZETA_P = 1                                        
+      ENDIF                                                         
+
+
+      IF (N_WIRE_PER_SPINDLE .EQ. 4) THEN
+            ZETA_A = 0.1
+            ZETA_P = 0.9
+      ENDIF
+      IF (N_WIRE_PER_SPINDLE .EQ. 9) THEN
+            ZETA_A = 0
+            ZETA_P = 1
+      ENDIF
+c END modification many spindles
+
+
+
+
+C DDSDDE_FIBER
+      DDSDDE(2,2) = ZETA_A*2*EPSILON*E*C**4
+      DDSDDE(3,3) = ZETA_A*2*EPSILON*E*S**4
+      DDSDDE(2,3) = ZETA_A*2*EPSILON*E*C**2*S**2
+      DDSDDE(3,2) = ZETA_A*2*EPSILON*E*S**2*C**2
+      DDSDDE(6,6) = ZETA_A*2*EPSILON*E*S**2*C**2
+
+
+C DDSDDE_CURVE FIBER
+
+      DO K1=1,NTENS 
+            DO K2=1,NTENS
+                  DDSDDE(K1,K2) = DDSDDE(K1,K2) + ZETA_P*EPSILON*E*(EEARRAY(K1)*EEARRAY(K2)+SSARRAY(K1)*SSARRAY(K2))
+            END DO
+      END DO
+
+C DDSDDE_STRUCTRURE
+      MU = E/2.0/(1+0.3)
+      LAMDA = E*PO/(1+PO)/(1-2*PO)
+
+      
+C 
+
+      DDSDDE(1,1) = DDSDDE(1,1) + EPSILON*E
+      DDSDDE(1,2) = DDSDDE(1,2) + 0
+      DDSDDE(1,3) = DDSDDE(1,3) + 0
+      DDSDDE(2,1) = DDSDDE(2,1) + 0
+      DDSDDE(2,2) = DDSDDE(2,2) + 0
+      DDSDDE(2,3) = DDSDDE(2,3) + 0
+      DDSDDE(3,1) = DDSDDE(3,1) + 0
+      DDSDDE(3,2) = DDSDDE(3,2) + 0
+      DDSDDE(3,3) = DDSDDE(3,3) + 0
+      DDSDDE(4,4) = DDSDDE(4,4) + EPSILON*(MU)*SIN(ALPHA)   
+      DDSDDE(5,5) = DDSDDE(5,5) + EPSILON*(MU)*COS(ALPHA)     
+      DDSDDE(6,6) = DDSDDE(6,6) + 0
+
+
+
+C  UPDATING STRESS
+      DO K1=1,NTENS 
+            DO K2=1,NTENS 
+                  STRESS(K2)=STRESS(K2)+DDSDDE(K2,K1)*DSTRAN(K1) 
+            END DO
+      END DO        
+C FINALIZING SOLUTION DEPENDENT VALUABLES
+
+      E22 = (-DSTRAN(2))
+      E33 = (-DSTRAN(3))
+C STATEV_2 DEFINING
+                  
+      E_F = - (SQRT(((E22+1)**2+TAN(ALPHA)**2*(1+E33)**2)/(1+TAN(ALPHA)**2))-1)
+
+      DALPHA = (E22-E33)*S*C/(1+E33*S**2+E22*C**2)*ACC_FACTOR
+
+
+C FLAG
+
+
+      LATI_SPRING = 0.4
+
+      ET22 = STRAN(2)
+      ET33 = -STRAN(3)
+
+      TEMP_K1 = E_F+K2*ET22*COS(ALPHA)-K3*ET33*SIN(ALPHA)
+      TEMP_K2 = K2*ET22*SIN(ALPHA)+K3*ET33*COS(ALPHA)
+      TEMP_K3 = LATI_SPRING*ET22*SIN(ALPHA)
+      TEMP_K4 = LATI_SPRING
+      TEST_K = ATAN(TEMP_K2/TEMP_K1)/ALPHA 
+
+
+C FLAG
+
+
+
+      IF (Simplifying_Switch .EQ. 'ON') THEN
+            DALPHA = E22*S*C/(1+E22*C**2)*ACC_FACTOR
+            E_F = - (SQRT(((E22+1)**2+TAN(ALPHA)**2*(1+E33)**2)/(1+TAN(ALPHA)**2))-1)
+c            E_F =COS(ALPHA-DALPHA)*COS(ALPHA)*E22 - DALPHA**2/2
+
+c            E_F =COS(ALPHA-DALPHA)*COS(ALPHA)*E22 + SIN(ALPHA-DALPHA)*SIN(ALPHA)*E33 - DALPHA**2/2
+
+
+      ENDIF
+
+      ALPHA = ALPHA + DALPHA
+
+
+C OUTFLAG
+      STATEV(1) = ALPHA
+      STATEV(2) = EPSILON
+      STATEV(3) = (1+STATEV(3))*(1+E_F) - 1
+C      STATEV(3) = SIN(ALPHA)**2*STRAN(3)+COS(ALPHA)**2*STRAN(2)
+
+      STATEV(4) = STATEV(3)*E
+      STATEV(5) = ALPHA*180/PI
+      STATEV(6) = 90 - PHI*180/PI
+      STATEV(7) = TEMP_K3
+      STATEV(8) = TEMP_K4
+C END OUTFLAG
+
+
+C DEBUGING FLAG
+
+
+
+C END DEBUGING FLAG
+
+
+
+      RETURN
+      END
